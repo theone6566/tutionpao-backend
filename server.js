@@ -27,8 +27,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/chat', chatRoutes);
 
-// 3. Optimized Port (User specified 80)
-const PORT = process.env.PORT || 80;
+// 3. Dynamic Port (Crucial for Railway Trial Plan)
+const PORT = process.env.PORT || 3000;
 const httpServer = createServer(app);
 httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ TutionPao Live on port ${PORT}`);
