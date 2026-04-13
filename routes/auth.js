@@ -8,7 +8,14 @@ const router = express.Router();
 router.post('/login', async (req, res) => {
   const { phone } = req.body;
   if (!phone) return res.status(400).json({ error: "Phone required" });
-  res.json({ message: "OTP Sent successfully", phone });
+  
+  const user = await User.findOne({ phone });
+  res.json({ 
+    message: "OTP Sent successfully", 
+    phone, 
+    isNewUser: !user,
+    role: user ? user.role : null
+  });
 });
 
 // Verify OTP & Complete Profile Setup
