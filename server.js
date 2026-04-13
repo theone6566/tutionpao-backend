@@ -27,10 +27,10 @@ app.use('/api/auth', authRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/chat', chatRoutes);
 
-// 3. Dynamic Port (Crucial for Railway Trial Plan)
-const PORT = process.env.PORT || 3000;
+// 3. Final Standard Port (8080 is optimized for Railway)
+const PORT = process.env.PORT || 8080;
 const httpServer = createServer(app);
-httpServer.listen(PORT, '0.0.0.0', () => {
+httpServer.listen(PORT, () => {
     console.log(`✅ TutionPao Live on port ${PORT}`);
 });
 
