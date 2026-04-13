@@ -18,7 +18,7 @@ app.use(cors());
 app.use(express.json());
 
 // Main Mongo DB Connection
-const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/tutionpao';
+const MONGO_URI = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://localhost:27017/tutionpao';
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.log('❌ DB Error:', err));
