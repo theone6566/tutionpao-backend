@@ -27,63 +27,57 @@ app.use('/api/auth', authRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/chat', chatRoutes);
 
-// Main Mongo DB Connection
-const MONGO_URI = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://localhost:27017/tutionpao';
-mongoose.connect(MONGO_URI)
-  .then(() => console.log('✅ MongoDB Connected'))
-  .catch(err => console.log('❌ DB Error:', err));
-
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
 
+// START LISTENING IMMEDIATELY (Required by Railway)
+const PORT = process.env.PORT || 5000;
+httpServer.listen(PORT, () => {
+  console.log(`✅ TutionPao API ready on port ${PORT}`);
+});
+
+// Connect to Database separately
+const MONGO_URI = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://localhost:27017/tutionpao';
+mongoose.connect(MONGO_URI)
+  .then(() => console.log('✅ MongoDB Connected'))
+  .catch(err => console.log('❌ DB Error:', err));
+
 io.on('connection', (socket) => {
   console.log('User connected socket:', socket.id);
 
-  // User joins their personal room id
   socket.on('join', (userId) => {
     socket.join(userId);
   });
 
-  // Sending a ping / match request
   socket.on('send_ping', async (data) => {
-    // data = { senderId, receiverId, freeSlot, text }
-    const newRequest = new Message({
-      senderId: data.senderId,
-      receiverId: data.receiverId,
-      freeSlot: data.freeSlot,
-      messages: [{ text: "Connection Request Sent! Target Slot: " + data.freeSlot, sender: data.senderId }]
-    });
-    await newRequest.save();
-
-    // Notify the receiver in realtime
-    io.to(data.receiverId).emit('new_request', newRequest);
+    try {
+      const newRequest = new Message({
+        senderId: data.senderId,
+        receiverId: data.receiverId,
+        freeSlot: data.freeSlot,
+        messages: [{ text: "Connection Request Sent! Target Slot: " + data.freeSlot, sender: data.senderId }]
+      });
+      await newRequest.save();
+      io.to(data.receiverId).emit('new_request', newRequest);
+    } catch (e) { console.error(e); }
   });
 
-  // Sending a chat message in an accepted thread
   socket.on('send_message', async (data) => {
-    // data = { threadId, senderId, receiverId, text }
-    const thread = await Message.findById(data.threadId);
-    if (!thread || thread.status !== 'accepted') return;
+    try {
+      const thread = await Message.findById(data.threadId);
+      if (!thread || thread.status !== 'accepted') return;
 
-    const newMsg = { text: data.text, sender: data.senderId };
-    thread.messages.push(newMsg);
-    await thread.save();
+      const newMsg = { text: data.text, sender: data.senderId };
+      thread.messages.push(newMsg);
+      await thread.save();
 
-    io.to(data.receiverId).to(data.senderId).emit('receive_message', { threadId: data.threadId, message: newMsg });
+      io.to(data.receiverId).to(data.senderId).emit('receive_message', { threadId: data.threadId, message: newMsg });
+    } catch (e) { console.error(e); }
   });
 
   socket.on('disconnect', () => {
     console.log('User disconnected');
   });
-});
-
-app.get('/', (req, res) => {
-    res.send("TutionPao Real API is Running! 🚀🚀");
-});
-
-const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
-  console.log(`✅ Server spinning on port ${PORT}`);
 });
