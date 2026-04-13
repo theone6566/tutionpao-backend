@@ -14,12 +14,18 @@ import Message from './models/Message.js';
 dotenv.config();
 
 const app = express();
-app.use(cors()); // Allow all origins for the demo to solve connection issues
+app.use(cors());
 app.use(express.json());
 
+// Health Check
 app.get('/', (req, res) => {
-    res.send("TutionPao Real API is Running! 🚀🚀");
+    res.status(200).send("TutionPao Real API is Running! 🚀🚀");
 });
+
+// Routes
+app.use('/api/auth', authRoutes);
+app.use('/api/payment', paymentRoutes);
+app.use('/api/chat', chatRoutes);
 
 // Main Mongo DB Connection
 const MONGO_URI = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://localhost:27017/tutionpao';
@@ -27,12 +33,6 @@ mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB Connected'))
   .catch(err => console.log('❌ DB Error:', err));
 
-// Register API Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/payment', paymentRoutes);
-app.use('/api/chat', chatRoutes);
-
-// Socket.io for Realtime Ping/Chat
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
