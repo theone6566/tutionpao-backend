@@ -27,8 +27,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/chat', chatRoutes);
 
-// 3. Optimized Port for Railway (Default 8080)
-const PORT = process.env.PORT || 8080;
+// 3. Optimized Port (User specified 80)
+const PORT = process.env.PORT || 80;
 const httpServer = createServer(app);
 httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ TutionPao Live on port ${PORT}`);
