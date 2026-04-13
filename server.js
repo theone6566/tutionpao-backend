@@ -14,14 +14,10 @@ import Message from './models/Message.js';
 dotenv.config();
 
 const app = express();
-app.use(cors({
-  origin: ['https://tutionpao-app.vercel.app', 'https://tutionpao.com', 'http://localhost:5173'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-}));
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// 1. Health Check (Immediate Response)
+// 1. Health Check
 app.get('/', (req, res) => {
     res.status(200).send("TutionPao Real API is Running! 🚀🚀");
 });
@@ -31,14 +27,14 @@ app.use('/api/auth', authRoutes);
 app.use('/api/payment', paymentRoutes);
 app.use('/api/chat', chatRoutes);
 
-// 3. Start Listening IMMEDIATELY (To pass Railway Health Check)
+// 3. Optimized Port for Railway (Default 8080)
+const PORT = process.env.PORT || 8080;
 const httpServer = createServer(app);
-const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
+httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ TutionPao Live on port ${PORT}`);
 });
 
-// 4. Connect to Database (Asynchronous)
+// 4. Persistence (Async)
 const MONGO_URI = process.env.MONGO_URI || process.env.MONGO_URL || 'mongodb://localhost:27017/tutionpao';
 mongoose.connect(MONGO_URI)
   .then(() => console.log('✅ MongoDB Connected'))
