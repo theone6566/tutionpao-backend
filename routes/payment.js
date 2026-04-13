@@ -22,7 +22,10 @@ router.post('/create-order', async (req, res) => {
       receipt: "receipt_" + Math.random().toString(36).substring(7),
     };
     const order = await razorpay.orders.create(options);
-    res.json(order);
+    res.json({
+      ...order,
+      key_id: process.env.RAZORPAY_KEY_ID
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
