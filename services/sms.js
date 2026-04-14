@@ -44,7 +44,8 @@ export const createAndSendOTP = async (phone, purpose = 'login') => {
   // Send via SMS
   const result = await sendSMS(phone, otp);
 
-  return { success: true, message: 'OTP sent', mock: result.mock || false };
+  // Return OTP value in mock mode so frontend can display it
+  return { success: true, message: 'OTP sent', mock: result.mock || false, otp: result.mock ? otp : undefined };
 };
 
 // ─── VERIFY OTP ──────────────────────────────────────────────

@@ -180,14 +180,14 @@ router.post('/login', async (req, res) => {
     const result = await createAndSendOTP(phone, 'login');
 
     res.json({
-      message: result.mock ? `OTP sent (check server logs)` : "OTP sent to your mobile",
+      message: result.mock ? `OTP sent (demo mode)` : "OTP sent to your mobile",
       phone, role,
       isNewUser: !existingUser,
-      // Now we tell the frontend about the other role (for dual role)
       hasOtherRole: !!otherRoleUser,
       otherRole: otherRoleUser ? (role === 'teacher' ? 'student' : 'teacher') : null,
       otherRoleSubscribed: otherRoleUser?.isSubscribed || false,
-      mock: result.mock || false
+      mock: result.mock || false,
+      mockOtp: result.otp || undefined // Send OTP to frontend in mock mode
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to send OTP: " + err.message });
@@ -197,7 +197,7 @@ router.post('/login', async (req, res) => {
 // ─── VERIFY OTP & LOGIN/REGISTER ────────────────────────────
 // Now allows same phone to register as BOTH teacher and student
 router.post('/verify', async (req, res) => {
-  const { phone, otp, name, role, photo } = req.body;
+  const { phone, otp, name, role, photo, lat, lng } = req.body;
   if (!role) return res.status(400).json({ error: "Role required" });
 
   const otpResult = await verifyOTP(phone, otp, 'login');
@@ -210,13 +210,20 @@ router.post('/verify', async (req, res) => {
     let user = await Model.findOne({ phone });
 
     if (!user) {
-      // New user in this role — create
-      // (same phone can exist in both Teacher AND Student collections)
-      user = new Model({ phone, name, photo });
+      // New user — create with location if provided
+      const userData = { phone, name, photo };
+      if (lat && lng) {
+        userData.location = { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] };
+      }
+      user = new Model(userData);
       await user.save();
     } else {
       if (name && name !== 'New User') user.name = name;
       if (photo) user.photo = photo;
+      // Update location on every login so profile stays fresh in nearby searches
+      if (lat && lng) {
+        user.location = { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] };
+      }
       await user.save();
     }
 
