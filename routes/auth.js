@@ -48,7 +48,7 @@ router.get('/public/browse', async (req, res) => {
       : 'name photo subjectsNeeded budgetPerMonth grade location isSubscribed';
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
-    const users = await Model.find(query).select(selectFields).skip(skip).limit(parseInt(limit));
+    const users = await Model.find(query).select(selectFields).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit));
     const total = await Model.countDocuments(query);
 
     res.json({ users, total, page: parseInt(page), totalPages: Math.ceil(total / parseInt(limit)) });
