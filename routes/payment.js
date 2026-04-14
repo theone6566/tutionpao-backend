@@ -1,9 +1,11 @@
 import express from 'express';
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
-import User from '../models/User.js';
+import Teacher from '../models/Teacher.js';
+import Student from '../models/Student.js';
 
 const router = express.Router();
+const getModel = (role) => role === 'teacher' ? Teacher : Student;
 
 let razorpay;
 try {
@@ -32,17 +34,18 @@ router.post('/create-order', async (req, res) => {
 });
 
 router.post('/verify-payment', async (req, res) => {
-  const { userId, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-  
+  const { userId, role, razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
+
   const sign = razorpay_order_id + "|" + razorpay_payment_id;
   const expectedSign = crypto.createHmac("sha256", process.env.RAZORPAY_SECRET || 'dummy_secret')
                              .update(sign.toString())
                              .digest("hex");
 
   if (razorpay_signature === expectedSign) {
-    // Payment verified successfully
-    await User.findByIdAndUpdate(userId, { 
-      isSubscribed: true, 
+    const Model = getModel(role);
+    await Model.findByIdAndUpdate(userId, {
+      isSubscribed: true,
+      subscriptionPlan: 'premium',
       subscriptionExpiresAt: new Date(Date.now() + 30*24*60*60*1000) // 1 month
     });
     return res.json({ success: true, message: "Payment verified" });

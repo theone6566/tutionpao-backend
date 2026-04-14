@@ -5,6 +5,7 @@ const userSchema = new mongoose.Schema({
   name: { type: String },
   role: { type: String, enum: ['student', 'tutor'] },
   photo: { type: String },
+  bio: { type: String },
   qualifications: { type: String },
   school: { type: String },
   location: {
@@ -12,7 +13,8 @@ const userSchema = new mongoose.Schema({
     coordinates: { type: [Number], default: [0, 0] } // [lng, lat]
   },
   isSubscribed: { type: Boolean, default: false },
-  subscriptionExpiresAt: { type: Date }
+  subscriptionExpiresAt: { type: Date },
+  revealedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }]
 }, { timestamps: true });
 
 userSchema.index({ location: '2dsphere' });
