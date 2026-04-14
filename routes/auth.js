@@ -2,13 +2,116 @@ import express from 'express';
 import jwt from 'jsonwebtoken';
 import Teacher from '../models/Teacher.js';
 import Student from '../models/Student.js';
+import { createAndSendOTP, verifyOTP, sendAadhaarOTP, verifyAadhaarOTP } from '../services/sms.js';
 
 const router = express.Router();
 
 // Helper: get model by role
 const getModel = (role) => role === 'teacher' ? Teacher : Student;
 
-// ─── LOGIN (send OTP) ──────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════
+// PUBLIC ROUTES (no login required)
+// ═══════════════════════════════════════════════════════════════
+
+// ─── PUBLIC BROWSE (limited details) ────────────────────────
+// Anyone can see profiles with limited info: name, photo, subjects, price
+router.get('/public/browse', async (req, res) => {
+  const { role, lat, lng, maxDistance = 10000, subject, page = 1, limit = 20 } = req.query;
+
+  if (!role || !['teacher', 'student'].includes(role)) {
+    return res.status(400).json({ error: "Role must be 'teacher' or 'student'" });
+  }
+
+  try {
+    const Model = getModel(role);
+    let query = {};
+
+    // Location-based search if lat/lng provided
+    if (lat && lng) {
+      query.location = {
+        $near: {
+          $geometry: { type: "Point", coordinates: [parseFloat(lng), parseFloat(lat)] },
+          $maxDistance: parseInt(maxDistance)
+        }
+      };
+    }
+
+    // Subject filter
+    if (subject) {
+      const subjectRegex = new RegExp(subject, 'i');
+      if (role === 'teacher') {
+        query.subjects = { $elemMatch: { $regex: subjectRegex } };
+      } else {
+        query.subjectsNeeded = { $elemMatch: { $regex: subjectRegex } };
+      }
+    }
+
+    // Only select LIMITED fields for public view
+    const selectFields = role === 'teacher'
+      ? 'name photo subjects chargePerMonth location isSubscribed'
+      : 'name photo subjectsNeeded budgetPerMonth grade location isSubscribed';
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const users = await Model.find(query)
+      .select(selectFields)
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Model.countDocuments(query);
+
+    res.json({
+      users,
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / parseInt(limit))
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── PUBLIC PROFILE (limited) ───────────────────────────────
+// Public can see limited profile by ID
+router.get('/public/profile/:role/:userId', async (req, res) => {
+  try {
+    const Model = getModel(req.params.role);
+
+    const selectFields = req.params.role === 'teacher'
+      ? 'name photo subjects chargePerMonth hoursPerDay bio location isSubscribed createdAt'
+      : 'name photo subjectsNeeded budgetPerMonth grade school bio location isSubscribed createdAt';
+
+    const user = await Model.findById(req.params.userId).select(selectFields);
+    if (!user) return res.status(404).json({ error: "User not found" });
+    res.json(user);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── PUBLIC STATS ────────────────────────────────────────────
+router.get('/public/stats', async (req, res) => {
+  try {
+    const teacherCount = await Teacher.countDocuments();
+    const studentCount = await Student.countDocuments();
+    const subscribedTeachers = await Teacher.countDocuments({ isSubscribed: true });
+    const subscribedStudents = await Student.countDocuments({ isSubscribed: true });
+
+    res.json({
+      totalTeachers: teacherCount,
+      totalStudents: studentCount,
+      totalSubscribed: subscribedTeachers + subscribedStudents,
+      totalUsers: teacherCount + studentCount
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// AUTH ROUTES
+// ═══════════════════════════════════════════════════════════════
+
+// ─── SEND OTP (real SMS) ────────────────────────────────────
 router.post('/login', async (req, res) => {
   const { phone, role } = req.body;
   if (!phone) return res.status(400).json({ error: "Phone required" });
@@ -16,34 +119,52 @@ router.post('/login', async (req, res) => {
     return res.status(400).json({ error: "Role must be 'teacher' or 'student'" });
   }
 
+  // Check if already registered in the SAME role
   const Model = getModel(role);
-  const user = await Model.findOne({ phone });
+  const existingUser = await Model.findOne({ phone });
 
-  res.json({
-    message: "OTP Sent successfully",
-    phone,
-    role,
-    isNewUser: !user,
-  });
+  // Check if registered in OTHER role
+  const OtherModel = role === 'teacher' ? Student : Teacher;
+  const otherRoleUser = await OtherModel.findOne({ phone });
+
+  try {
+    const result = await createAndSendOTP(phone, 'login');
+
+    res.json({
+      message: result.mock ? `OTP sent (check server logs)` : "OTP sent to your mobile",
+      phone,
+      role,
+      isNewUser: !existingUser,
+      alreadyRegisteredAs: otherRoleUser ? (role === 'teacher' ? 'student' : 'teacher') : null,
+      mock: result.mock || false
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to send OTP: " + err.message });
+  }
 });
 
-// ─── VERIFY OTP & REGISTER/LOGIN ───────────────────────────────
+// ─── VERIFY OTP & LOGIN/REGISTER ────────────────────────────
 router.post('/verify', async (req, res) => {
   const { phone, otp, name, role, photo } = req.body;
-
-  if (otp !== '1234') return res.status(400).json({ error: "Invalid OTP" });
   if (!role) return res.status(400).json({ error: "Role required" });
+
+  // Verify OTP
+  const otpResult = await verifyOTP(phone, otp, 'login');
+  if (!otpResult.success) {
+    return res.status(400).json({ error: otpResult.error });
+  }
 
   try {
     const Model = getModel(role);
     let user = await Model.findOne({ phone });
 
     if (!user) {
-      // Create new user
+      // Check duplicate — can't register same phone in same role
+      // (Already handled by findOne above, so this creates new user)
       user = new Model({ phone, name, role, photo });
       await user.save();
     } else {
-      // Update if new info provided
+      // Existing user — update if new info provided
       if (name) user.name = name;
       if (photo) user.photo = photo;
       await user.save();
@@ -57,28 +178,86 @@ router.post('/verify', async (req, res) => {
 
     res.json({ token, user, role });
   } catch (err) {
+    // Duplicate key error (phone already exists)
+    if (err.code === 11000) {
+      return res.status(400).json({ error: "This phone number is already registered as " + role + ". Please login instead." });
+    }
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── COMPLETE SUBSCRIPTION PROFILE ─────────────────────────────
-// Called AFTER payment, to collect detailed info
-router.post('/complete-profile', async (req, res) => {
-  const { userId, role, aadhaar, aadhaarOtp } = req.body;
+// ═══════════════════════════════════════════════════════════════
+// AADHAAR VERIFICATION (after subscription)
+// ═══════════════════════════════════════════════════════════════
 
-  // Aadhaar OTP verification stub (demo: accept 1234)
-  if (aadhaarOtp !== '1234') {
-    return res.status(400).json({ error: "Invalid Aadhaar OTP" });
+// ─── SEND AADHAAR OTP ───────────────────────────────────────
+router.post('/aadhaar/send-otp', async (req, res) => {
+  const { aadhaarNumber, userId, role } = req.body;
+
+  if (!aadhaarNumber || aadhaarNumber.length !== 12) {
+    return res.status(400).json({ error: "Enter valid 12-digit Aadhaar number" });
   }
+
+  try {
+    const result = await sendAadhaarOTP(aadhaarNumber);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        reference_id: result.reference_id,
+        message: result.mock
+          ? `Aadhaar OTP: ${result.mockOtp} (check server logs)`
+          : 'OTP sent to Aadhaar-linked mobile number',
+        mock: result.mock || false
+      });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── VERIFY AADHAAR OTP ─────────────────────────────────────
+router.post('/aadhaar/verify-otp', async (req, res) => {
+  const { referenceId, otp, aadhaarNumber, userId, role } = req.body;
+
+  try {
+    const result = await verifyAadhaarOTP(referenceId, otp, aadhaarNumber);
+
+    if (result.success) {
+      // Update user as Aadhaar verified
+      const Model = getModel(role);
+      await Model.findByIdAndUpdate(userId, {
+        aadhaar: aadhaarNumber.slice(-4), // Store last 4 only
+        isAadhaarVerified: true
+      });
+
+      res.json({
+        success: true,
+        message: 'Aadhaar verified successfully',
+        aadhaarData: result.data
+      });
+    } else {
+      res.status(400).json({ error: result.error });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// PROFILE ROUTES (authenticated)
+// ═══════════════════════════════════════════════════════════════
+
+// ─── COMPLETE SUBSCRIPTION PROFILE ──────────────────────────
+router.post('/complete-profile', async (req, res) => {
+  const { userId, role } = req.body;
 
   try {
     const Model = getModel(role);
     let user = await Model.findById(userId);
     if (!user) return res.status(404).json({ error: "User not found" });
-
-    // Store last 4 digits of Aadhaar
-    user.aadhaar = aadhaar ? aadhaar.slice(-4) : '';
-    user.isAadhaarVerified = true;
 
     if (role === 'teacher') {
       const { qualifications, subjects, chargePerMonth, hoursPerDay, bio, experience } = req.body;
@@ -104,14 +283,13 @@ router.post('/complete-profile', async (req, res) => {
   }
 });
 
-// ─── UPDATE PROFILE ─────────────────────────────────────────────
+// ─── UPDATE PROFILE ─────────────────────────────────────────
 router.put('/profile', async (req, res) => {
   const { userId, role, ...updates } = req.body;
   if (!userId || !role) return res.status(400).json({ error: "userId and role required" });
 
   try {
     const Model = getModel(role);
-    // Only allow safe fields to be updated
     const allowed = role === 'teacher'
       ? ['name', 'photo', 'qualifications', 'subjects', 'chargePerMonth', 'hoursPerDay', 'bio', 'experience', 'nearbyAlerts', 'darkMode']
       : ['name', 'photo', 'grade', 'school', 'subjectsNeeded', 'budgetPerMonth', 'bio', 'nearbyAlerts', 'darkMode'];
@@ -128,11 +306,11 @@ router.put('/profile', async (req, res) => {
   }
 });
 
-// ─── GET PROFILE ────────────────────────────────────────────────
+// ─── GET PROFILE ────────────────────────────────────────────
 router.get('/me/:role/:userId', async (req, res) => {
   try {
     const Model = getModel(req.params.role);
-    const user = await Model.findById(req.params.userId);
+    const user = await Model.findById(req.params.userId).select('-aadhaar');
     if (!user) return res.status(404).json({ error: "User not found" });
     res.json(user);
   } catch (err) {
@@ -140,7 +318,7 @@ router.get('/me/:role/:userId', async (req, res) => {
   }
 });
 
-// ─── UPDATE LOCATION ────────────────────────────────────────────
+// ─── UPDATE LOCATION ────────────────────────────────────────
 router.post('/location', async (req, res) => {
   const { userId, role, lat, lng } = req.body;
   try {
@@ -154,13 +332,13 @@ router.post('/location', async (req, res) => {
   }
 });
 
-// ─── SEARCH NEARBY ──────────────────────────────────────────────
+// ─── SEARCH NEARBY (authenticated) ──────────────────────────
 router.get('/nearby', async (req, res) => {
-  const { lng, lat, role, maxDistance = 5000 } = req.query; // 5km radius
+  const { lng, lat, role, maxDistance = 5000 } = req.query;
   if (!lng || !lat || !role) return res.status(400).json({ error: "lng, lat, and role required" });
 
   try {
-    const Model = getModel(role); // search the TARGET role's collection
+    const Model = getModel(role);
     const users = await Model.find({
       location: {
         $near: {
@@ -168,7 +346,7 @@ router.get('/nearby', async (req, res) => {
           $maxDistance: parseInt(maxDistance)
         }
       }
-    }).select('-aadhaar -__v'); // Don't expose aadhaar
+    }).select('-aadhaar -__v');
 
     res.json(users);
   } catch (err) {
@@ -176,7 +354,7 @@ router.get('/nearby', async (req, res) => {
   }
 });
 
-// ─── ADD TO LIST (save a profile) ─────────────────────────────
+// ─── SAVE PROFILE (Add to List) ─────────────────────────────
 router.post('/save-profile', async (req, res) => {
   const { userId, role, targetId } = req.body;
   try {
@@ -195,7 +373,7 @@ router.post('/save-profile', async (req, res) => {
   }
 });
 
-// ─── REMOVE FROM LIST ────────────────────────────────────────
+// ─── UNSAVE PROFILE ─────────────────────────────────────────
 router.post('/unsave-profile', async (req, res) => {
   const { userId, role, targetId } = req.body;
   try {
@@ -212,7 +390,7 @@ router.post('/unsave-profile', async (req, res) => {
   }
 });
 
-// ─── GET SAVED PROFILES (My List) ────────────────────────────
+// ─── GET SAVED PROFILES ─────────────────────────────────────
 router.get('/saved/:role/:userId', async (req, res) => {
   try {
     const Model = getModel(req.params.role);
