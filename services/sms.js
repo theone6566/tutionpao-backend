@@ -36,7 +36,9 @@ export const createAndSendOTP = async (phone, purpose = 'login') => {
   // Remove any existing OTP for this phone+purpose
   await OTP.deleteMany({ phone, purpose });
 
-  const otp = generateOTP();
+  // If no API key is set, force OTP to 1234 for easy testing
+  const apiKey = process.env.FAST2SMS_API_KEY;
+  const otp = apiKey ? generateOTP() : '1234';
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
 
   await OTP.create({ phone, otp, purpose, expiresAt });
@@ -84,8 +86,8 @@ export const sendAadhaarOTP = async (aadhaarNumber) => {
   const baseUrl = process.env.SUREPASS_BASE_URL || 'https://sandbox.surepass.io';
 
   if (!apiKey) {
-    // Mock mode: generate a local OTP and store it
-    const otp = generateOTP();
+    // Mock mode: generate a local OTP and store it (forced 1234)
+    const otp = '1234';
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
     // Store with aadhaar number as phone substitute
