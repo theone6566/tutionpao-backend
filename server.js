@@ -151,18 +151,20 @@ io.on('connection', (socket) => {
       }).select('_id');
 
       const SearcherModel = getModel(data.searcherRole);
-      const searcher = await SearcherModel.findById(data.searcherId).select('name');
+      const searcher = await SearcherModel.findById(data.searcherId);
+      const price = data.searcherRole === 'teacher' ? (searcher?.chargePerMonth || 'Negotiable') : (searcher?.budgetPerMonth || 'Negotiable');
 
       for (const nearbyUser of nearbyUsers) {
         const notification = new Notification({
           userId: nearbyUser._id,
           userRole: targetRole,
           type: 'nearby_search',
-          title: 'Someone is searching near you!',
-          message: `${searcher?.name || 'Someone'} is looking for a ${targetRole} nearby${data.subject ? ` for ${data.subject}` : ''}.`,
+          title: '🔥 New Nearby Lead!',
+          message: `${searcher?.name || 'Someone'} is looking for a ${targetRole} nearby!\nSubject: ${data.subject || 'Any'}\nBudget/Fee: ₹${price}\nDistance: Within 5km`,
           fromUserId: data.searcherId,
           fromUserRole: data.searcherRole,
         });
+
         await notification.save();
         io.to(nearbyUser._id.toString()).emit('new_notification', notification);
       }
